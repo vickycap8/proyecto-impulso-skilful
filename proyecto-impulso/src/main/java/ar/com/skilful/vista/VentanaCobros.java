@@ -4,11 +4,16 @@ import java.awt.*;
 import ar.com.skilful.sesion.SesionUsuario;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.sql.*;
+import java.sql.SQLException;
 
 import javax.swing.*;
 
-import ar.com.skilful.conexion.ConexionBD;
+import ar.com.skilful.modelo.Cuota;
+import ar.com.skilful.modelo.MedioPago;
+import ar.com.skilful.modelo.Pago;
+import ar.com.skilful.modelo.ResultadoCobro;
+import ar.com.skilful.modelo.Tarifa;
+import ar.com.skilful.servicio.CobroServicio;
 
 public class VentanaCobros extends JFrame {
 
@@ -49,8 +54,12 @@ public class VentanaCobros extends JFrame {
     private BigDecimal importeFinal = BigDecimal.ZERO;
     private BigDecimal descuentoCalculado = BigDecimal.ZERO;
     private BigDecimal recargoCalculado = BigDecimal.ZERO;
+    private BigDecimal montoTarifaAplicada = BigDecimal.ZERO;
+    private Cuota cuotaActual;
+    private final CobroServicio cobroServicio;
 
     public VentanaCobros() {
+        cobroServicio = new CobroServicio();
         configurarVentana();
         crearContenido();
         cargarMediosPago();
@@ -163,14 +172,6 @@ public class VentanaCobros extends JFrame {
         	    e -> actualizarAplicacionSaldo()
         	);
 
-        botonRegistrar.addActionListener(e ->
-            JOptionPane.showMessageDialog(
-                this,
-                "El cálculo es correcto. En el siguiente paso "
-                + "incorporaremos el registro definitivo del pago."
-            )
-        );
-        
         botonHistorial.addActionListener(e -> {
             new VentanaHistorialCobros().setVisible(true);
         });
@@ -223,29 +224,10 @@ public class VentanaCobros extends JFrame {
     }
 
     private void cargarMediosPago() {
-        String sql =
-            "SELECT id_medio_pago, nombre, recargo_porcentaje, "
-          + "admite_beneficio "
-          + "FROM medio_pago WHERE activo = TRUE "
-          + "AND nombre <> 'MERCADO_PAGO' "
-          + "ORDER BY id_medio_pago";
-
-        try (Connection conexion = ConexionBD.conectar();
-             PreparedStatement sentencia =
-                 conexion.prepareStatement(sql);
-             ResultSet resultado = sentencia.executeQuery()) {
-
-            while (resultado.next()) {
-                comboMedioPago.addItem(
-                    new MedioPago(
-                        resultado.getInt("id_medio_pago"),
-                        resultado.getString("nombre"),
-                        resultado.getBigDecimal(
-                            "recargo_porcentaje"
-                        ),
-                        resultado.getBoolean("admite_beneficio")
-                    )
-                );
+        try {
+            for (MedioPago medio
+                    : cobroServicio.listarMediosPagoPresenciales()) {
+                comboMedioPago.addItem(medio);
             }
 
         } catch (SQLException e) {
@@ -269,68 +251,21 @@ public class VentanaCobros extends JFrame {
     private void cargarCuotaPendiente() {
         limpiarDatosCuota();
 
-        String sql =
-            "SELECT c.id_cuota, m.id_plan, p.nombre AS plan, "
-          + "c.periodo, c.fecha_vencimiento, c.estado AS estado_cuota, "
-          + "c.importe_original, "
-          + "COALESCE(tb.nombre, 'NINGUNO') AS beneficio, "
-          + "EXISTS ("
-          + "SELECT 1 FROM suscripcion su "
-          + "WHERE su.id_membresia = m.id_membresia "
-          + "AND su.estado = 'ACTIVA'"
-          + ") AS tiene_suscripcion, "
-          + "COALESCE(("
-          + "SELECT MAX(ic.numero_intento) "
-          + "FROM suscripcion su "
-          + "INNER JOIN intento_cobro ic "
-          + "ON ic.id_suscripcion = su.id_suscripcion "
-          + "WHERE su.id_membresia = m.id_membresia "
-          + "AND su.estado = 'ACTIVA' "
-          + "AND ic.id_cuota = c.id_cuota"
-          + "), 0) AS intentos_suscripcion "
-          + "FROM membresia m "
-          + "INNER JOIN plan p ON p.id_plan = m.id_plan "
-          + "INNER JOIN cuota c ON c.id_membresia = m.id_membresia "
-          + "LEFT JOIN beneficio_socio bs "
-          + "ON bs.id_socio = m.id_socio "
-          + "AND bs.estado = 'ACTIVO' "
-          + "AND (bs.fecha_vencimiento IS NULL "
-          + "OR bs.fecha_vencimiento >= CURDATE()) "
-          + "LEFT JOIN tipo_beneficio tb "
-          + "ON tb.id_tipo_beneficio = bs.id_tipo_beneficio "
-          + "WHERE m.id_socio = ? "
-          + "AND m.estado = 'ACTIVA' "
-          + "AND c.estado IN ('PENDIENTE', 'VENCIDA') "
-          + "ORDER BY c.periodo "
-          + "LIMIT 1";
+        try {
+            cuotaActual = cobroServicio.buscarCuotaPendiente(idSocio);
 
-        try (Connection conexion = ConexionBD.conectar();
-             PreparedStatement sentencia =
-                 conexion.prepareStatement(sql)) {
+            if (cuotaActual != null) {
+                boolean tieneSuscripcion = cuotaActual.isSuscripcionActiva();
+                int intentosSuscripcion = cuotaActual.getIntentosSuscripcion();
 
-            sentencia.setInt(1, idSocio);
+                pagoPresencialBloqueado =
+                    tieneSuscripcion && intentosSuscripcion < 5;
 
-            try (ResultSet resultado = sentencia.executeQuery()) {
-                if (resultado.next()) {
-                	boolean tieneSuscripcion =
-                		    resultado.getBoolean("tiene_suscripcion");
-
-                		int intentosSuscripcion =
-                		    resultado.getInt("intentos_suscripcion");
-
-                		pagoPresencialBloqueado =
-                		    tieneSuscripcion && intentosSuscripcion < 5;
-
-                		pagoAlternativoSuscripcion =
-                			    tieneSuscripcion;
-                    idCuota = resultado.getInt("id_cuota");
-                    idPlan = resultado.getInt("id_plan");
-                    precioOriginal = resultado.getBigDecimal(
-                        "importe_original"
-                    );
-                    beneficioActivo = resultado.getString(
-                        "beneficio"
-                    );
+                pagoAlternativoSuscripcion = tieneSuscripcion;
+                idCuota = cuotaActual.getId();
+                idPlan = cuotaActual.getIdPlan();
+                precioOriginal = cuotaActual.getImporteOriginal();
+                beneficioActivo = cuotaActual.getBeneficioActivo();
                     
                     if (pagoPresencialBloqueado) {
 
@@ -351,18 +286,12 @@ public class VentanaCobros extends JFrame {
                         campoBeneficio.setText(beneficioActivo);
                     }
 
-                    campoPlan.setText(resultado.getString("plan"));
-                    campoPeriodo.setText(
-                        resultado.getDate("periodo").toString()
-                    );               
+                    campoPlan.setText(cuotaActual.getNombrePlan());
+                    campoPeriodo.setText(cuotaActual.getPeriodo().toString());
                     campoVencimiento.setText(
-                    	    resultado.getDate(
-                    	        "fecha_vencimiento"
-                    	    ).toString()
+                        cuotaActual.getFechaVencimiento().toString()
                     );
-                    campoEstadoCuota.setText(
-                    	    resultado.getString("estado_cuota")
-                    );
+                    campoEstadoCuota.setText(cuotaActual.getEstado());
                     campoPrecioOriginal.setText(
                     	    formatoMoneda(precioOriginal)
                     );
@@ -385,13 +314,12 @@ public class VentanaCobros extends JFrame {
                         );
                     }
 
-                    } else {
-                    JOptionPane.showMessageDialog(
-                        this,
-                        "El socio no posee una cuota pendiente "
-                        + "en una membresía activa."
-                    );
-                }
+            } else {
+                JOptionPane.showMessageDialog(
+                    this,
+                    "El socio no posee una cuota pendiente "
+                    + "en una membresía activa."
+                );
             }
 
         } catch (SQLException e) {
@@ -403,26 +331,10 @@ public class VentanaCobros extends JFrame {
     }
     
     private void cargarSaldoDisponible() {
-        String sql =
-            "SELECT saldo_disponible "
-          + "FROM vw_saldo_socio "
-          + "WHERE id_socio = ?";
-
         saldoDisponible = BigDecimal.ZERO;
 
-        try (Connection conexion = ConexionBD.conectar();
-             PreparedStatement sentencia =
-                 conexion.prepareStatement(sql)) {
-
-            sentencia.setInt(1, idSocio);
-
-            try (ResultSet resultado = sentencia.executeQuery()) {
-                if (resultado.next()) {
-                    saldoDisponible = resultado.getBigDecimal(
-                        "saldo_disponible"
-                    );
-                }
-            }
+        try {
+            saldoDisponible = cobroServicio.obtenerSaldoSocio(idSocio);
 
             campoSaldoDisponible.setText(
                 formatoMoneda(saldoDisponible)
@@ -449,101 +361,37 @@ public class VentanaCobros extends JFrame {
             return;
         }
 
-        String codigoTarifa = "GENERAL";
+        try {
+            String codigoTarifa =
+                cobroServicio.determinarCodigoTarifa(cuotaActual, medio);
 
-        if (pagoAlternativoSuscripcion) {
-            String nombreMedio = medio.getNombre();
+            Tarifa tarifa = cobroServicio.buscarTarifa(idPlan, codigoTarifa);
 
-            if (!"EFECTIVO".equals(nombreMedio)
-                    && !"TRANSFERENCIA".equals(nombreMedio)) {
-
-                idTarifaAplicada = -1;
-                campoDescuento.setText("-");
-                campoRecargo.setText("-");
-                campoImporteFinal.setText("-");
-                campoSaldoAplicado.setText("-");
-                campoTotalAbonar.setText("-");
-
+            if (tarifa == null) {
                 JOptionPane.showMessageDialog(
                     this,
-                    "Después de cinco rechazos, la tarifa de suscripción "
-                    + "solo puede conservarse pagando en efectivo "
-                    + "o transferencia.",
-                    "Medio de pago no permitido",
-                    JOptionPane.WARNING_MESSAGE
+                    "No existe una tarifa vigente para " + codigoTarifa + "."
                 );
                 return;
             }
 
-            codigoTarifa = "SUSCRIPCION";
+            idTarifaAplicada = tarifa.getId();
+            montoTarifaAplicada = tarifa.getMonto();
+            actualizarAplicacionSaldo();
 
-        } else if (medio.isAdmiteBeneficio()
-                && !"NINGUNO".equals(beneficioActivo)) {
-
-            codigoTarifa = beneficioActivo;
-        }
-
-        String sql =
-            "SELECT id_tarifa, monto "
-          + "FROM tarifa_plan "
-          + "WHERE id_plan = ? "
-          + "AND codigo_tarifa = ? "
-          + "AND activo = TRUE "
-          + "AND CURDATE() >= vigencia_desde "
-          + "AND (vigencia_hasta IS NULL "
-          + "OR CURDATE() <= vigencia_hasta) "
-          + "ORDER BY vigencia_desde DESC LIMIT 1";
-
-        try (Connection conexion = ConexionBD.conectar();
-             PreparedStatement sentencia =
-                 conexion.prepareStatement(sql)) {
-
-            sentencia.setInt(1, idPlan);
-            sentencia.setString(2, codigoTarifa);
-
-            try (ResultSet resultado = sentencia.executeQuery()) {
-                if (!resultado.next()) {
-                    JOptionPane.showMessageDialog(
-                        this,
-                        "No existe una tarifa vigente para "
-                        + codigoTarifa + "."
-                    );
-                    return;
-                }
-
-                idTarifaAplicada = resultado.getInt("id_tarifa");
-
-                BigDecimal tarifaAplicada =
-                    resultado.getBigDecimal("monto");
-
-                BigDecimal descuento =
-                    precioOriginal.subtract(tarifaAplicada);
-
-                if (descuento.compareTo(BigDecimal.ZERO) < 0) {
-                    descuento = BigDecimal.ZERO;
-                }
-
-                BigDecimal recargo = tarifaAplicada
-                    .multiply(medio.getRecargo())
-                    .divide(
-                        new BigDecimal("100"),
-                        2,
-                        RoundingMode.HALF_UP
-                    );
-                
-                descuentoCalculado = descuento;
-                recargoCalculado = recargo;
-
-                importeFinal = tarifaAplicada.add(recargo);
-
-                campoDescuento.setText(formatoMoneda(descuento));
-                campoRecargo.setText(formatoMoneda(recargo));
-                campoImporteFinal.setText(
-                    formatoMoneda(importeFinal)
-                );
-                actualizarAplicacionSaldo();
-            }
-
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            idTarifaAplicada = -1;
+            campoDescuento.setText("-");
+            campoRecargo.setText("-");
+            campoImporteFinal.setText("-");
+            campoSaldoAplicado.setText("-");
+            campoTotalAbonar.setText("-");
+            JOptionPane.showMessageDialog(
+                this,
+                e.getMessage(),
+                "Operación no permitida",
+                JOptionPane.WARNING_MESSAGE
+            );
         } catch (SQLException e) {
             mostrarError("No se pudo calcular el importe.", e);
         }
@@ -635,108 +483,26 @@ public class VentanaCobros extends JFrame {
         MedioPago medio =
             (MedioPago) comboMedioPago.getSelectedItem();
 
-        Connection conexion = null;
-
         try {
-            conexion = ConexionBD.conectar();
-            conexion.setAutoCommit(false);
-
             int idUsuario = SesionUsuario.getIdUsuario();
             int idSede = SesionUsuario.getIdSede();
 
-            if (idUsuario == 0 || idSede == 0) {
-                throw new SQLException(
-                    "No existe una sesión activa con una sede seleccionada."
-                );
-            }
+            Pago pago = new Pago();
+            pago.setIdSocio(idSocio);
+            pago.setIdCuota(idCuota);
+            pago.setIdMedioPago(medio.getId());
+            pago.setIdTarifaAplicada(idTarifaAplicada);
+            pago.setIdUsuario(idUsuario);
+            pago.setIdSede(idSede);
+            pago.setPrecioOriginal(precioOriginal);
+            pago.setDescuento(descuentoCalculado);
+            pago.setRecargo(recargoCalculado);
+            pago.setSaldoAplicado(saldoAplicado);
+            pago.setImporteFinal(importeFinal);
+            pago.setImporteAbonado(importeAbonado);
+            pago.setSaldoGenerado(saldoGenerado);
 
-            String sqlPago =
-                "INSERT INTO pago "
-              + "(id_cuota, id_medio_pago, id_tarifa_aplicada, "
-              + "id_usuario, id_sede, precio_original, descuento, "
-              + "recargo, saldo_aplicado, importe_final, "
-              + "importe_abonado, saldo_generado, estado) "
-              + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-              + "'REGISTRADO')";
-
-            long idPago;
-
-            try (PreparedStatement sentencia = conexion.prepareStatement(
-                    sqlPago,
-                    Statement.RETURN_GENERATED_KEYS)) {
-
-                sentencia.setInt(1, idCuota);
-                sentencia.setInt(2, medio.getId());
-                sentencia.setInt(3, idTarifaAplicada);
-                sentencia.setInt(4, idUsuario);
-                sentencia.setInt(5, idSede);
-                sentencia.setBigDecimal(6, precioOriginal);
-                sentencia.setBigDecimal(7, descuentoCalculado);
-                sentencia.setBigDecimal(8, recargoCalculado);
-                sentencia.setBigDecimal(9, saldoAplicado);
-                sentencia.setBigDecimal(10, importeFinal);
-                sentencia.setBigDecimal(11, importeAbonado);
-                sentencia.setBigDecimal(12, saldoGenerado);
-
-                sentencia.executeUpdate();
-
-                try (ResultSet claves = sentencia.getGeneratedKeys()) {
-                    if (!claves.next()) {
-                        throw new SQLException(
-                            "No se pudo obtener el identificador del pago."
-                        );
-                    }
-
-                    idPago = claves.getLong(1);
-                }
-            }
-
-            String sqlCuota =
-                "UPDATE cuota SET estado = 'PAGADA' "
-              + "WHERE id_cuota = ?";
-
-            try (PreparedStatement sentencia =
-                    conexion.prepareStatement(sqlCuota)) {
-
-                sentencia.setInt(1, idCuota);
-                sentencia.executeUpdate();
-            }
-            
-            if (saldoAplicado.compareTo(BigDecimal.ZERO) > 0) {
-                String sqlDebito =
-                    "INSERT INTO movimiento_saldo "
-                  + "(id_socio, id_pago, tipo, monto, descripcion) "
-                  + "VALUES (?, ?, 'DEBITO', ?, "
-                  + "'Saldo aplicado al pago de cuota')";
-
-                try (PreparedStatement sentencia =
-                        conexion.prepareStatement(sqlDebito)) {
-
-                    sentencia.setInt(1, idSocio);
-                    sentencia.setLong(2, idPago);
-                    sentencia.setBigDecimal(3, saldoAplicado);
-                    sentencia.executeUpdate();
-                }
-            }
-
-            if (saldoGenerado.compareTo(BigDecimal.ZERO) > 0) {
-                String sqlSaldo =
-                    "INSERT INTO movimiento_saldo "
-                  + "(id_socio, id_pago, tipo, monto, descripcion) "
-                  + "VALUES (?, ?, 'CREDITO', ?, "
-                  + "'Saldo generado por cobro de cuota')";
-
-                try (PreparedStatement sentencia =
-                        conexion.prepareStatement(sqlSaldo)) {
-
-                    sentencia.setInt(1, idSocio);
-                    sentencia.setLong(2, idPago);
-                    sentencia.setBigDecimal(3, saldoGenerado);
-                    sentencia.executeUpdate();
-                }
-            }
-
-            conexion.commit();
+            cobroServicio.registrarPago(pago);
 
             JOptionPane.showMessageDialog(
                 this,
@@ -750,41 +516,41 @@ public class VentanaCobros extends JFrame {
             campoSocio.setText("");
             limpiarDatosCuota();
 
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            JOptionPane.showMessageDialog(
+                this,
+                e.getMessage(),
+                "Operación no permitida",
+                JOptionPane.WARNING_MESSAGE
+            );
         } catch (SQLException e) {
-            if (conexion != null) {
-                try {
-                    conexion.rollback();
-                } catch (SQLException errorRollback) {
-                    System.out.println(
-                        "No se pudo revertir la operación."
-                    );
-                }
-            }
-
             mostrarError("No se pudo registrar el pago.", e);
-
-        } finally {
-            if (conexion != null) {
-                try {
-                    conexion.setAutoCommit(true);
-                    conexion.close();
-                } catch (SQLException e) {
-                    System.out.println(
-                        "No se pudo cerrar la conexión."
-                    );
-                }
-            }
         }
     }
     
     private void actualizarAplicacionSaldo() {
-        if (checkUsarSaldo.isSelected()) {
-            saldoAplicado = saldoDisponible.min(importeFinal);
-        } else {
-            saldoAplicado = BigDecimal.ZERO;
+        MedioPago medio = (MedioPago) comboMedioPago.getSelectedItem();
+        if (medio == null || idTarifaAplicada == -1) {
+            return;
         }
 
-        totalAbonar = importeFinal.subtract(saldoAplicado);
+        ResultadoCobro resultado = cobroServicio.calcular(
+            precioOriginal,
+            montoTarifaAplicada,
+            medio.getRecargoPorcentaje(),
+            saldoDisponible,
+            checkUsarSaldo.isSelected()
+        );
+
+        descuentoCalculado = resultado.getDescuento();
+        recargoCalculado = resultado.getRecargo();
+        importeFinal = resultado.getImporteFinal();
+        saldoAplicado = resultado.getSaldoAplicado();
+        totalAbonar = resultado.getTotalAbonar();
+
+        campoDescuento.setText(formatoMoneda(descuentoCalculado));
+        campoRecargo.setText(formatoMoneda(recargoCalculado));
+        campoImporteFinal.setText(formatoMoneda(importeFinal));
 
         campoSaldoAplicado.setText(
             formatoMoneda(saldoAplicado)
@@ -799,12 +565,14 @@ public class VentanaCobros extends JFrame {
         idCuota = -1;
         idPlan = -1;
         idTarifaAplicada = -1;
+        cuotaActual = null;
         beneficioActivo = null;
         precioOriginal = BigDecimal.ZERO;
         importeFinal = BigDecimal.ZERO;
         
         descuentoCalculado = BigDecimal.ZERO;
         recargoCalculado = BigDecimal.ZERO;
+        montoTarifaAplicada = BigDecimal.ZERO;
         
         saldoDisponible = BigDecimal.ZERO;
         saldoAplicado = BigDecimal.ZERO;
@@ -847,44 +615,4 @@ public class VentanaCobros extends JFrame {
         );
     }
 
-    private static class MedioPago {
-    	
-    	public String getNombre() {
-    	    return nombre;
-    	}
-
-        private final int id;
-        private final String nombre;
-        private final BigDecimal recargo;
-        private final boolean admiteBeneficio;
-
-        public MedioPago(
-                int id,
-                String nombre,
-                BigDecimal recargo,
-                boolean admiteBeneficio) {
-
-            this.id = id;
-            this.nombre = nombre;
-            this.recargo = recargo;
-            this.admiteBeneficio = admiteBeneficio;
-        }
-
-        public int getId() {
-            return id;
-        }
-
-        public BigDecimal getRecargo() {
-            return recargo;
-        }
-
-        public boolean isAdmiteBeneficio() {
-            return admiteBeneficio;
-        }
-
-        @Override
-        public String toString() {
-            return nombre.replace("_", " ");
-        }
-    }
 }

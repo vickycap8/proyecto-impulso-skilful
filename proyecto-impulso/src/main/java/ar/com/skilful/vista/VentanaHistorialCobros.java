@@ -1,6 +1,8 @@
 package ar.com.skilful.vista;
 
 import ar.com.skilful.conexion.ConexionBD;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
@@ -177,16 +179,16 @@ public class VentanaHistorialCobros extends JFrame {
                         resultado.getString("plan"),
                         resultado.getString("medio_pago"),
                         formatoMoneda(
-                            resultado.getDouble("importe_final")
+                            resultado.getBigDecimal("importe_final")
                         ),
                         formatoMoneda(
-                            resultado.getDouble("saldo_aplicado")
+                            resultado.getBigDecimal("saldo_aplicado")
                         ),
                         formatoMoneda(
-                            resultado.getDouble("importe_abonado")
+                            resultado.getBigDecimal("importe_abonado")
                         ),
                         formatoMoneda(
-                            resultado.getDouble("saldo_generado")
+                            resultado.getBigDecimal("saldo_generado")
                         ),
                         resultado.getString("estado_pago"),
                         resultado.getString("sede"),
@@ -206,8 +208,10 @@ public class VentanaHistorialCobros extends JFrame {
         }
     }
 
-    private String formatoMoneda(double importe) {
-        return String.format("$ %.2f", importe);
+    private String formatoMoneda(BigDecimal importe) {
+        return "$ " + importe
+            .setScale(2, RoundingMode.HALF_UP)
+            .toPlainString();
     }
 
     public static void main(String[] args) {

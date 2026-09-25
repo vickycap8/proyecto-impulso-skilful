@@ -1,19 +1,15 @@
 package ar.com.skilful.vista;
 
 import java.awt.*;
-import java.security.MessageDigest;
-import java.sql.*;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Base64;
 import java.util.List;
 
-import javax.crypto.SecretKeyFactory;
-import javax.crypto.spec.PBEKeySpec;
 import javax.swing.*;
 
-import ar.com.skilful.conexion.ConexionBD;
+import ar.com.skilful.modelo.Sede;
+import ar.com.skilful.modelo.Usuario;
 import ar.com.skilful.sesion.SesionUsuario;
+import ar.com.skilful.servicio.AutenticacionServicio;
 import ar.com.skilful.servicio.GeneradorCuotas;
 
 public class VentanaLogin extends JFrame {
@@ -23,8 +19,10 @@ public class VentanaLogin extends JFrame {
     private JTextField campoUsuario;
     private JPasswordField campoContrasena;
     private JButton botonIngresar;
+    private final AutenticacionServicio autenticacionServicio;
 
     public VentanaLogin() {
+        autenticacionServicio = new AutenticacionServicio();
         configurarVentana();
         crearContenido();
     }
@@ -135,82 +133,50 @@ public class VentanaLogin extends JFrame {
 
         botonIngresar.setEnabled(false);
 
-        String sql =
-            "SELECT u.id_usuario, u.nombre_completo, "
-          + "u.nombre_usuario, u.clave_hash, u.clave_salt, "
-          + "u.clave_iteraciones, r.nombre AS rol "
-          + "FROM usuario u "
-          + "INNER JOIN rol r ON r.id_rol = u.id_rol "
-          + "WHERE u.nombre_usuario = ? "
-          + "AND u.activo = TRUE "
-          + "AND r.activo = TRUE";
+        try {
+            Usuario usuario = autenticacionServicio.autenticar(
+                nombreUsuario,
+                contrasena
+            );
 
-        try (Connection conexion = ConexionBD.conectar();
-             PreparedStatement sentencia =
-                 conexion.prepareStatement(sql)) {
-
-            sentencia.setString(1, nombreUsuario);
-
-            try (ResultSet resultado = sentencia.executeQuery()) {
-                if (!resultado.next()) {
-                    mostrarAccesoIncorrecto();
-                    return;
-                }
-
-                boolean claveValida = verificarContrasena(
-                    contrasena,
-                    resultado.getString("clave_salt"),
-                    resultado.getString("clave_hash"),
-                    resultado.getInt("clave_iteraciones")
-                );
-
-                if (!claveValida) {
-                    mostrarAccesoIncorrecto();
-                    return;
-                }
-
-                int idUsuario = resultado.getInt("id_usuario");
-                String nombreCompleto =
-                    resultado.getString("nombre_completo");
-                String rol = resultado.getString("rol");
-
-                SedeItem sede = seleccionarSede(
-                    conexion,
-                    idUsuario
-                );
-
-                if (sede == null) {
-                    return;
-                }
-
-                SesionUsuario.iniciarSesion(
-                	    idUsuario,
-                	    nombreCompleto,
-                	    nombreUsuario,
-                	    rol,
-                	    sede.getId(),
-                	    sede.getNombre()
-                	);
-
-                	try {
-                	    GeneradorCuotas.generarCuotasMesActual();
-
-                	} catch (SQLException errorCuotas) {
-                	    JOptionPane.showMessageDialog(
-                	        this,
-                	        "La sesión se inició, pero no fue posible "
-                	            + "actualizar las cuotas del mes.\n"
-                	            + errorCuotas.getMessage(),
-                	        "Advertencia",
-                	        JOptionPane.WARNING_MESSAGE
-                	    );
-                	}
-
-                	VentanaPrincipal ventana = new VentanaPrincipal();
-
-                ventana.setVisible(true);
-                dispose();
+            if (usuario == null) {
+                mostrarAccesoIncorrecto();
+                return;
             }
+
+            Sede sede = seleccionarSede(usuario.getId());
+
+            if (sede == null) {
+                return;
+            }
+
+            SesionUsuario.iniciarSesion(
+                usuario.getId(),
+                usuario.getNombreCompleto(),
+                usuario.getNombreUsuario(),
+                usuario.getRol(),
+                sede.getId(),
+                sede.getNombre()
+            );
+
+            try {
+                GeneradorCuotas.generarCuotasMesActual();
+
+            } catch (Exception errorCuotas) {
+                JOptionPane.showMessageDialog(
+                    this,
+                    "La sesión se inició, pero no fue posible "
+                        + "actualizar las cuotas del mes.\n"
+                        + errorCuotas.getMessage(),
+                    "Advertencia",
+                    JOptionPane.WARNING_MESSAGE
+                );
+            }
+
+            VentanaPrincipal ventana = new VentanaPrincipal();
+
+            ventana.setVisible(true);
+            dispose();
 
         } catch (Exception e) {
             JOptionPane.showMessageDialog(
@@ -226,69 +192,9 @@ public class VentanaLogin extends JFrame {
         }
     }
 
-    private boolean verificarContrasena(
-            char[] contrasena,
-            String saltBase64,
-            String hashBase64,
-            int iteraciones) throws Exception {
-
-        byte[] salt = Base64.getDecoder().decode(saltBase64);
-        byte[] hashEsperado =
-            Base64.getDecoder().decode(hashBase64);
-
-        PBEKeySpec especificacion = new PBEKeySpec(
-            contrasena,
-            salt,
-            iteraciones,
-            hashEsperado.length * 8
-        );
-
-        SecretKeyFactory fabrica = SecretKeyFactory.getInstance(
-            "PBKDF2WithHmacSHA256"
-        );
-
-        byte[] hashCalculado =
-            fabrica.generateSecret(especificacion).getEncoded();
-
-        especificacion.clearPassword();
-
-        return MessageDigest.isEqual(
-            hashEsperado,
-            hashCalculado
-        );
-    }
-
-    private SedeItem seleccionarSede(
-            Connection conexion,
-            int idUsuario) throws SQLException {
-
-        List<SedeItem> sedes = new ArrayList<>();
-
-        String sql =
-            "SELECT s.id_sede, s.nombre "
-          + "FROM usuario_sede us "
-          + "INNER JOIN sede s ON s.id_sede = us.id_sede "
-          + "WHERE us.id_usuario = ? "
-          + "AND us.activo = TRUE "
-          + "AND s.activo = TRUE "
-          + "ORDER BY s.nombre";
-
-        try (PreparedStatement sentencia =
-                conexion.prepareStatement(sql)) {
-
-            sentencia.setInt(1, idUsuario);
-
-            try (ResultSet resultado = sentencia.executeQuery()) {
-                while (resultado.next()) {
-                    sedes.add(
-                        new SedeItem(
-                            resultado.getInt("id_sede"),
-                            resultado.getString("nombre")
-                        )
-                    );
-                }
-            }
-        }
+    private Sede seleccionarSede(int idUsuario) throws Exception {
+        List<Sede> sedes =
+            autenticacionServicio.listarSedesAutorizadas(idUsuario);
 
         if (sedes.isEmpty()) {
             JOptionPane.showMessageDialog(
@@ -312,7 +218,7 @@ public class VentanaLogin extends JFrame {
             sedes.get(0)
         );
 
-        return (SedeItem) seleccion;
+        return (Sede) seleccion;
     }
 
     private void mostrarAccesoIncorrecto() {
@@ -325,30 +231,6 @@ public class VentanaLogin extends JFrame {
 
         campoContrasena.setText("");
         campoContrasena.requestFocus();
-    }
-
-    private static class SedeItem {
-
-        private final int id;
-        private final String nombre;
-
-        public SedeItem(int id, String nombre) {
-            this.id = id;
-            this.nombre = nombre;
-        }
-
-        public int getId() {
-            return id;
-        }
-
-        public String getNombre() {
-            return nombre;
-        }
-
-        @Override
-        public String toString() {
-            return nombre;
-        }
     }
 
     public static void main(String[] args) {

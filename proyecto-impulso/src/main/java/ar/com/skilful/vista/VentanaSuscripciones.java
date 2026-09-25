@@ -1,12 +1,14 @@
 package ar.com.skilful.vista;
 
 import java.awt.*;
+import java.math.BigDecimal;
 import java.sql.*;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 
 import ar.com.skilful.sesion.SesionUsuario;
+import ar.com.skilful.servicio.SuscripcionServicio;
 import ar.com.skilful.conexion.ConexionBD;
 
 public class VentanaSuscripciones extends JFrame {
@@ -16,8 +18,10 @@ public class VentanaSuscripciones extends JFrame {
     private JTextField campoBusqueda;
     private JTable tablaSuscripciones;
     private DefaultTableModel modeloTabla;
+    private final SuscripcionServicio suscripcionServicio;
 
     public VentanaSuscripciones() {
+        suscripcionServicio = new SuscripcionServicio();
         configurarVentana();
         crearContenido();
         cargarSuscripciones("");
@@ -477,8 +481,8 @@ public class VentanaSuscripciones extends JFrame {
             try {
                 int idCuota;
                 int idTarifa;
-                double precioOriginal;
-                double importeSuscripcion;
+                BigDecimal precioOriginal;
+                BigDecimal importeSuscripcion;
 
                 try (PreparedStatement consulta =
                         conexion.prepareStatement(sqlDatos)) {
@@ -501,14 +505,15 @@ public class VentanaSuscripciones extends JFrame {
                         idCuota = resultado.getInt("id_cuota");
                         idTarifa = resultado.getInt("id_tarifa");
                         precioOriginal =
-                            resultado.getDouble("importe_original");
+                            resultado.getBigDecimal("importe_original");
                         importeSuscripcion =
-                            resultado.getDouble("monto");
+                            resultado.getBigDecimal("monto");
                     }
                 }
 
-                double descuento =
-                    Math.max(0, precioOriginal - importeSuscripcion);
+                BigDecimal descuento = precioOriginal
+                    .subtract(importeSuscripcion)
+                    .max(BigDecimal.ZERO);
 
                 long idPago;
 
@@ -520,10 +525,10 @@ public class VentanaSuscripciones extends JFrame {
                     pago.setInt(2, idTarifa);
                     pago.setInt(3, SesionUsuario.getIdUsuario());
                     pago.setInt(4, SesionUsuario.getIdSede());
-                    pago.setDouble(5, precioOriginal);
-                    pago.setDouble(6, descuento);
-                    pago.setDouble(7, importeSuscripcion);
-                    pago.setDouble(8, importeSuscripcion);
+                    pago.setBigDecimal(5, precioOriginal);
+                    pago.setBigDecimal(6, descuento);
+                    pago.setBigDecimal(7, importeSuscripcion);
+                    pago.setBigDecimal(8, importeSuscripcion);
 
                     int filasPago = pago.executeUpdate();
 
@@ -559,7 +564,7 @@ public class VentanaSuscripciones extends JFrame {
                     );
                     intento.setLong(5, idPago);
                     intento.setInt(6, numeroIntento);
-                    intento.setDouble(7, importeSuscripcion);
+                    intento.setBigDecimal(7, importeSuscripcion);
                     intento.setString(8, observacion.trim());
 
                     intento.executeUpdate();
@@ -643,24 +648,8 @@ public class VentanaSuscripciones extends JFrame {
             return;
         }
 
-        String sql =
-            "UPDATE suscripcion " +
-            "SET estado = 'FINALIZADA', " +
-            "fecha_baja = CURDATE() " +
-            "WHERE id_suscripcion = ? " +
-            "AND estado = 'ACTIVA' " +
-            "AND CURDATE() >= permanencia_hasta";
-
-        try (
-            Connection conexion = ConexionBD.conectar();
-            PreparedStatement sentencia =
-                conexion.prepareStatement(sql)
-        ) {
-            sentencia.setInt(1, idSuscripcion);
-
-            int filas = sentencia.executeUpdate();
-
-            if (filas == 0) {
+        try {
+            if (!suscripcionServicio.finalizar(idSuscripcion)) {
                 JOptionPane.showMessageDialog(
                     this,
                     "La suscripción no puede finalizarse todavía.\n"

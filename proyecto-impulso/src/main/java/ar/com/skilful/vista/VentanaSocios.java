@@ -4,9 +4,6 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.FlowLayout;
 import java.awt.Font;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 
 import javax.swing.BorderFactory;
@@ -21,7 +18,8 @@ import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.table.DefaultTableModel;
 
-import ar.com.skilful.conexion.ConexionBD;
+import ar.com.skilful.modelo.Socio;
+import ar.com.skilful.servicio.SocioServicio;
 
 public class VentanaSocios extends JFrame {
 
@@ -30,8 +28,10 @@ public class VentanaSocios extends JFrame {
     private JTextField campoBusqueda;
     private JTable tablaSocios;
     private DefaultTableModel modeloTabla;
+    private final SocioServicio socioServicio;
 
     public VentanaSocios() {
+        socioServicio = new SocioServicio();
         configurarVentana();
         crearContenido();
         cargarSocios("");
@@ -173,36 +173,17 @@ public class VentanaSocios extends JFrame {
     private void cargarSocios(String busqueda) {
         modeloTabla.setRowCount(0);
 
-        String sql =
-            "SELECT so.id_socio, so.dni, so.apellido, so.nombre, "
-          + "so.telefono, so.correo, se.nombre AS sede "
-          + "FROM socio so "
-          + "INNER JOIN sede se ON se.id_sede = so.id_sede_habitual "
-          + "WHERE so.activo = TRUE "
-          + "AND (so.dni LIKE ? OR so.nombre LIKE ? OR so.apellido LIKE ?) "
-          + "ORDER BY so.apellido, so.nombre";
-
-        try (Connection conexion = ConexionBD.conectar();
-             PreparedStatement sentencia = conexion.prepareStatement(sql)) {
-
-            String filtro = "%" + busqueda + "%";
-
-            sentencia.setString(1, filtro);
-            sentencia.setString(2, filtro);
-            sentencia.setString(3, filtro);
-
-            try (ResultSet resultado = sentencia.executeQuery()) {
-                while (resultado.next()) {
-                    modeloTabla.addRow(new Object[] {
-                        resultado.getInt("id_socio"),
-                        resultado.getString("dni"),
-                        resultado.getString("apellido"),
-                        resultado.getString("nombre"),
-                        resultado.getString("telefono"),
-                        resultado.getString("correo"),
-                        resultado.getString("sede")
-                    });
-                }
+        try {
+            for (Socio socio : socioServicio.buscarActivos(busqueda)) {
+                modeloTabla.addRow(new Object[] {
+                    socio.getId(),
+                    socio.getDni(),
+                    socio.getApellido(),
+                    socio.getNombre(),
+                    socio.getTelefono(),
+                    socio.getCorreo(),
+                    socio.getNombreSede()
+                });
             }
 
         } catch (SQLException e) {

@@ -7,10 +7,8 @@ import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
-import java.sql.Connection;
-import java.sql.Date;
-import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.time.LocalDate;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -21,7 +19,8 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 
-import ar.com.skilful.conexion.ConexionBD;
+import ar.com.skilful.modelo.Socio;
+import ar.com.skilful.servicio.SocioServicio;
 
 public class FormularioSocio extends JDialog {
 
@@ -38,10 +37,12 @@ public class FormularioSocio extends JDialog {
     private JComboBox<String> comboSede;
 
     private VentanaSocios ventanaSocios;
+    private final SocioServicio socioServicio;
 
     public FormularioSocio(VentanaSocios ventanaSocios) {
         super(ventanaSocios, "Registrar socio", true);
         this.ventanaSocios = ventanaSocios;
+        this.socioServicio = new SocioServicio();
 
         configurarVentana();
         crearContenido();
@@ -160,29 +161,21 @@ public class FormularioSocio extends JDialog {
             return;
         }
 
-        String sql =
-            "INSERT INTO socio "
-          + "(id_sede_habitual, dni, nombre, apellido, fecha_nacimiento, "
-          + "telefono, telefono_emergencia, correo, domicilio, activo) "
-          + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)";
-
-        try (Connection conexion = ConexionBD.conectar();
-             PreparedStatement sentencia = conexion.prepareStatement(sql)) {
-
-            sentencia.setInt(1, comboSede.getSelectedIndex() + 1);
-            sentencia.setString(2, campoDni.getText().trim());
-            sentencia.setString(3, campoNombre.getText().trim());
-            sentencia.setString(4, campoApellido.getText().trim());
-            sentencia.setDate(
-                5,
-                Date.valueOf(campoFechaNacimiento.getText().trim())
+        try {
+            Socio socio = new Socio();
+            socio.setIdSedeHabitual(comboSede.getSelectedIndex() + 1);
+            socio.setDni(campoDni.getText().trim());
+            socio.setNombre(campoNombre.getText().trim());
+            socio.setApellido(campoApellido.getText().trim());
+            socio.setFechaNacimiento(
+                LocalDate.parse(campoFechaNacimiento.getText().trim())
             );
-            sentencia.setString(6, campoTelefono.getText().trim());
-            sentencia.setString(7, campoEmergencia.getText().trim());
-            sentencia.setString(8, campoCorreo.getText().trim());
-            sentencia.setString(9, campoDomicilio.getText().trim());
+            socio.setTelefono(campoTelefono.getText().trim());
+            socio.setTelefonoEmergencia(campoEmergencia.getText().trim());
+            socio.setCorreo(campoCorreo.getText().trim());
+            socio.setDomicilio(campoDomicilio.getText().trim());
 
-            sentencia.executeUpdate();
+            socioServicio.registrar(socio);
 
             JOptionPane.showMessageDialog(
                 this,
@@ -192,11 +185,19 @@ public class FormularioSocio extends JDialog {
             ventanaSocios.refrescarSocios();
             dispose();
 
-        } catch (IllegalArgumentException e) {
+        } catch (java.time.format.DateTimeParseException e) {
             JOptionPane.showMessageDialog(
                 this,
                 "La fecha debe escribirse con el formato AAAA-MM-DD.",
                 "Fecha incorrecta",
+                JOptionPane.WARNING_MESSAGE
+            );
+
+        } catch (IllegalArgumentException e) {
+            JOptionPane.showMessageDialog(
+                this,
+                e.getMessage(),
+                "Datos incorrectos",
                 JOptionPane.WARNING_MESSAGE
             );
 
