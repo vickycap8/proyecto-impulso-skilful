@@ -227,18 +227,92 @@ public class VentanaBeneficios extends JFrame {
             return;
         }
 
-        String sql =
-            "UPDATE beneficio_socio "
-          + "SET fecha_presentacion = CURDATE(), "
-          + "fecha_vencimiento = DATE_ADD(CURDATE(), INTERVAL 6 MONTH), "
-          + "estado = 'ACTIVO' "
-          + "WHERE id_beneficio_socio = ?";
+        try (Connection conexion = ConexionBD.conectar()) {
+            conexion.setAutoCommit(false);
+            try {
+                renovarConservandoHistorial(conexion, idBeneficio);
+                conexion.commit();
+            } catch (SQLException | RuntimeException error) {
+                conexion.rollback();
+                throw error;
+            }
+            JOptionPane.showMessageDialog(this,
+                "Se registró el nuevo certificado.\n"
+                + "El beneficio anterior se conserva como FINALIZADO.");
+            cargarBeneficios(campoBusqueda.getText().trim());
+        } catch (SQLException error) {
+            JOptionPane.showMessageDialog(this,
+                "No se pudo renovar el beneficio.\n" + error.getMessage(),
+                "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
 
-        ejecutarActualizacion(
-            sql,
-            idBeneficio,
-            "El beneficio estudiantil fue renovado correctamente."
-        );
+    /** El llamador inicia la transacción y confirma o revierte ambos cambios. */
+    static void renovarConservandoHistorial(Connection conexion, int idBeneficio)
+            throws SQLException {
+        if (conexion.getAutoCommit()) {
+            throw new SQLException("La renovación requiere una transacción.");
+        }
+        int idSocio;
+        int idTipo;
+        String estado;
+        // El bloqueo evita renovar dos veces el mismo registro simultáneamente.
+        String consulta = "SELECT b.id_socio, b.id_tipo_beneficio, b.estado, "
+            + "t.nombre FROM beneficio_socio b JOIN tipo_beneficio t "
+            + "ON t.id_tipo_beneficio = b.id_tipo_beneficio "
+            + "WHERE b.id_beneficio_socio = ? FOR UPDATE";
+        try (PreparedStatement ps = conexion.prepareStatement(consulta)) {
+            ps.setInt(1, idBeneficio);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    throw new SQLException("El beneficio seleccionado ya no existe.");
+                }
+                if (!"ESTUDIANTE".equalsIgnoreCase(rs.getString("nombre"))) {
+                    throw new SQLException("Solo se renuevan certificados estudiantiles.");
+                }
+                idSocio = rs.getInt("id_socio");
+                idTipo = rs.getInt("id_tipo_beneficio");
+                estado = rs.getString("estado");
+            }
+        }
+        if (!"ACTIVO".equals(estado) && !"VENCIDO".equals(estado)) {
+            throw new SQLException("Este registro ya está finalizado. "
+                + "Seleccione el beneficio vigente o vencido que desea renovar.");
+        }
+        try (PreparedStatement ps = conexion.prepareStatement(
+                "SELECT id_beneficio_socio FROM beneficio_socio "
+                + "WHERE id_socio = ? AND estado = 'ACTIVO' "
+                + "AND id_beneficio_socio <> ? FOR UPDATE")) {
+            ps.setInt(1, idSocio);
+            ps.setInt(2, idBeneficio);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    throw new SQLException("El socio ya tiene otro beneficio activo.");
+                }
+            }
+        }
+        // Solo cambia el estado: se conservan las fechas y observaciones anteriores.
+        try (PreparedStatement ps = conexion.prepareStatement(
+                "UPDATE beneficio_socio SET estado = 'FINALIZADO' "
+                + "WHERE id_beneficio_socio = ?")) {
+            ps.setInt(1, idBeneficio);
+            if (ps.executeUpdate() != 1) {
+                throw new SQLException("No se pudo cerrar el beneficio anterior.");
+            }
+        }
+        try (PreparedStatement ps = conexion.prepareStatement(
+                "INSERT INTO beneficio_socio (id_socio, id_tipo_beneficio, "
+                + "fecha_presentacion, fecha_vencimiento, estado, observacion) "
+                + "VALUES (?, ?, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 6 MONTH), "
+                + "'ACTIVO', ?)")) {
+            ps.setInt(1, idSocio);
+            ps.setInt(2, idTipo);
+            ps.setString(3, "Renovación del beneficio " + idBeneficio
+                + ". Nuevo certificado estudiantil presentado.");
+            if (ps.executeUpdate() != 1) {
+                throw new SQLException("No se pudo registrar el nuevo certificado.");
+            }
+        }
     }
 
     private void finalizarBeneficio() {
@@ -319,8 +393,7 @@ public class VentanaBeneficios extends JFrame {
           + "ON tb.id_tipo_beneficio = bs.id_tipo_beneficio "
           + "LEFT JOIN empresa_convenio ec "
           + "ON ec.id_empresa = bs.id_empresa "
-          + "WHERE bs.estado = 'ACTIVO' "
-          + "AND (so.dni LIKE ? "
+          + "WHERE (so.dni LIKE ? "
           + "OR so.nombre LIKE ? "
           + "OR so.apellido LIKE ? "
           + "OR tb.nombre LIKE ?) "
