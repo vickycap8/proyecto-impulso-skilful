@@ -15,6 +15,14 @@ public class VentanaSuscripciones extends JFrame {
 
     private static final long serialVersionUID = 1L;
 
+    private static final int COL_ID = 0;
+    private static final int COL_SOCIO = 2;
+    private static final int COL_PERIODO = 3;
+    private static final int COL_ESTADO_CUOTA = 4;
+    private static final int COL_PERMANENCIA = 9;
+    private static final int COL_ID_CUOTA = 14;
+    private static final int COL_ID_INTENTO = 15;
+
     private JTextField campoBusqueda;
     private JTable tablaSuscripciones;
     private DefaultTableModel modeloTabla;
@@ -48,7 +56,7 @@ public class VentanaSuscripciones extends JFrame {
         titulo.setFont(new Font("Arial", Font.BOLD, 22));
 
         JLabel informacion = new JLabel(
-            "Seguimiento centralizado de todas las sedes"
+            "Seleccione la fila del período que desea gestionar"
         );
         informacion.setForeground(Color.LIGHT_GRAY);
 
@@ -78,9 +86,10 @@ public class VentanaSuscripciones extends JFrame {
 
         modeloTabla = new DefaultTableModel(
             new Object[] {
-                "ID", "DNI", "Socio", "Teléfono", "Sede",
-                "Plan", "Día", "Permanencia", "Intentos",
-                "Último resultado", "Notificación", "Estado"
+                "ID", "DNI", "Socio", "Período", "Estado cuota",
+                "Teléfono", "Sede", "Plan", "Día", "Permanencia",
+                "Intentos", "Último resultado", "Notificación", "Estado",
+                "ID cuota", "ID intento"
             }, 0
         ) {
             private static final long serialVersionUID = 1L;
@@ -100,6 +109,9 @@ public class VentanaSuscripciones extends JFrame {
             ListSelectionModel.SINGLE_SELECTION
         );
 
+        // Identificadores del registro seleccionado: no dependen del orden visible.
+        tablaSuscripciones.removeColumn(tablaSuscripciones.getColumnModel().getColumn(15));
+        tablaSuscripciones.removeColumn(tablaSuscripciones.getColumnModel().getColumn(14));
         establecerAnchos();
 
         JScrollPane desplazamiento =
@@ -208,8 +220,8 @@ public class VentanaSuscripciones extends JFrame {
 
     private void establecerAnchos() {
         int[] anchos = {
-            45, 90, 160, 110, 120, 60,
-            45, 100, 65, 110, 100, 80
+            45, 90, 160, 90, 100, 110, 120, 70,
+            45, 100, 65, 125, 105, 80
         };
 
         for (int i = 0; i < anchos.length; i++) {
@@ -231,389 +243,197 @@ public class VentanaSuscripciones extends JFrame {
         return boton;
     }
 
-    private void validarSeleccion(String operacion) {
-        if (tablaSuscripciones.getSelectedRow() == -1) {
-            JOptionPane.showMessageDialog(
-                this,
-                "Primero debe seleccionar una suscripción."
-            );
-            return;
-        }
-
-        JOptionPane.showMessageDialog(
-            this,
-            "A continuación incorporaremos la función para "
-            + operacion + "."
-        );
+    private int filaSeleccionada() {
+        int fila = tablaSuscripciones.getSelectedRow();
+        return fila < 0 ? -1 : tablaSuscripciones.convertRowIndexToModel(fila);
     }
-    
+
+    private int entero(int fila, int columna) {
+        return ((Number) modeloTabla.getValueAt(fila, columna)).intValue();
+    }
+
     private void registrarIntentoRechazado() {
-        int fila = tablaSuscripciones.getSelectedRow();
-
-        if (fila == -1) {
-            JOptionPane.showMessageDialog(
-                this,
-                "Primero debe seleccionar una suscripción."
-            );
-            return;
-        }
-
-        int idSuscripcion = Integer.parseInt(
-            modeloTabla.getValueAt(fila, 0).toString()
-        );
-
-        int intentosRealizados = Integer.parseInt(
-            modeloTabla.getValueAt(fila, 8).toString()
-        );
-
-        if (intentosRealizados >= 5) {
-            JOptionPane.showMessageDialog(
-                this,
-                "La suscripción alcanzó el máximo de cinco intentos. "
-                + "El socio deberá abonar mediante un medio alternativo.",
-                "Máximo de intentos",
-                JOptionPane.WARNING_MESSAGE
-            );
-            return;
-        }
-
-        int numeroIntento = intentosRealizados + 1;
-
-        int confirmacion = JOptionPane.showConfirmDialog(
-            this,
-            "Se registrará el intento número "
-            + numeroIntento + " como RECHAZADO.\n"
-            + "¿Desea continuar?",
-            "Registrar rechazo",
-            JOptionPane.YES_NO_OPTION
-        );
-
-        if (confirmacion != JOptionPane.YES_OPTION) {
-            return;
-        }
-
-        String observacion = JOptionPane.showInputDialog(
-            this,
-            "Ingrese una observación:",
-            "Cobro rechazado por Mercado Pago"
-        );
-
-        if (observacion == null) {
-            return;
-        }
-
-        String sql =
-        	    "INSERT INTO intento_cobro "
-        	  + "(id_suscripcion, id_cuota, id_usuario, id_sede, "
-        	  + "numero_intento, importe, estado, observacion) "
-        	  + "SELECT su.id_suscripcion, c.id_cuota, "
-        	  + "?, ?, ?, tp.monto, 'RECHAZADO', ? "
-        	  + "FROM suscripcion su "
-        	  + "INNER JOIN membresia m "
-        	  + "ON m.id_membresia = su.id_membresia "
-        	  + "INNER JOIN cuota c "
-        	  + "ON c.id_membresia = m.id_membresia "
-        	  + "AND c.estado IN ('PENDIENTE', 'VENCIDA') "
-        	  + "INNER JOIN tarifa_plan tp "
-        	  + "ON tp.id_plan = m.id_plan "
-        	  + "AND tp.codigo_tarifa = 'SUSCRIPCION' "
-        	  + "AND tp.activo = TRUE "
-        	  + "WHERE su.id_suscripcion = ? "
-        	  + "AND su.estado = 'ACTIVA' "
-        	  + "AND CURDATE() >= tp.vigencia_desde "
-        	  + "AND (tp.vigencia_hasta IS NULL "
-        	  + "OR CURDATE() <= tp.vigencia_hasta) "
-        	  + "LIMIT 1";
-
-        try (Connection conexion = ConexionBD.conectar();
-             PreparedStatement sentencia =
-                 conexion.prepareStatement(sql)) {
-
-        	sentencia.setInt(
-        		    1,
-        		    SesionUsuario.getIdUsuario()
-        		);
-
-        		sentencia.setInt(
-        		    2,
-        		    SesionUsuario.getIdSede()
-        		);
-
-        		sentencia.setInt(3, numeroIntento);
-        		sentencia.setString(4, observacion.trim());
-        		sentencia.setInt(5, idSuscripcion);
-
-            int filas = sentencia.executeUpdate();
-
-            if (filas == 0) {
-                JOptionPane.showMessageDialog(
-                    this,
-                    "No se encontró una cuota pendiente para la suscripción."
-                );
-                return;
-            }
-
-            JOptionPane.showMessageDialog(
-                this,
-                "El intento " + numeroIntento
-                + " fue registrado como rechazado."
-            );
-
-            cargarSuscripciones("");
-
-        } catch (SQLException e) {
-            JOptionPane.showMessageDialog(
-                this,
-                "No se pudo registrar el intento.\n"
-                + e.getMessage(),
-                "Error",
-                JOptionPane.ERROR_MESSAGE
-            );
-        }
+        registrarResultadoDesdePantalla(false);
     }
-    
+
     private void registrarIntentoAprobado() {
+        registrarResultadoDesdePantalla(true);
+    }
 
-        int fila = tablaSuscripciones.getSelectedRow();
-
-        if (fila == -1) {
-            JOptionPane.showMessageDialog(
-                this,
-                "Primero debe seleccionar una suscripción."
-            );
+    private void registrarResultadoDesdePantalla(boolean aprobado) {
+        int fila = filaSeleccionada();
+        if (fila < 0) {
+            JOptionPane.showMessageDialog(this, "Seleccione la suscripción y el período.");
             return;
         }
-
-        int idSuscripcion = Integer.parseInt(
-            modeloTabla.getValueAt(fila, 0).toString()
-        );
-
-        int intentosRealizados = Integer.parseInt(
-            modeloTabla.getValueAt(fila, 8).toString()
-        );
-
-        if (intentosRealizados >= 5) {
-            JOptionPane.showMessageDialog(
-                this,
-                "La suscripción alcanzó el máximo de cinco intentos. "
-                    + "El socio deberá abonar mediante un medio alternativo.",
-                "Máximo de intentos",
-                JOptionPane.WARNING_MESSAGE
-            );
+        int idCuota = entero(fila, COL_ID_CUOTA);
+        String estado = String.valueOf(modeloTabla.getValueAt(fila, COL_ESTADO_CUOTA));
+        if (idCuota == 0 || !("PENDIENTE".equals(estado) || "VENCIDA".equals(estado))) {
+            JOptionPane.showMessageDialog(this,
+                "Seleccione una cuota PENDIENTE o VENCIDA.");
             return;
         }
-
-        int numeroIntento = intentosRealizados + 1;
-
-        int confirmacion = JOptionPane.showConfirmDialog(
-            this,
-            "Se registrará el intento número "
-                + numeroIntento + " como APROBADO.\n"
-                + "También se registrará el pago de la cuota.\n\n"
-                + "¿Desea continuar?",
-            "Confirmar cobro aprobado",
-            JOptionPane.YES_NO_OPTION
-        );
-
-        if (confirmacion != JOptionPane.YES_OPTION) {
+        String resultado = aprobado ? "APROBADO" : "RECHAZADO";
+        String periodo = String.valueOf(modeloTabla.getValueAt(fila, COL_PERIODO));
+        if (JOptionPane.showConfirmDialog(this,
+                "Socio: " + modeloTabla.getValueAt(fila, COL_SOCIO)
+                + "\nPeríodo: " + periodo + "\nResultado: " + resultado
+                + (aprobado ? "\nTambién se registrará el pago de esta cuota." : "")
+                + "\n¿Confirma el resultado consultado en Mercado Pago?",
+                "Registrar resultado", JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) {
             return;
         }
-
-        String observacion = JOptionPane.showInputDialog(
-            this,
-            "Ingrese una observación o referencia:",
-            "Cobro aprobado por Mercado Pago"
-        );
-
+        String observacion = JOptionPane.showInputDialog(this,
+            "Ingrese una observación o referencia:", "Cobro " + resultado + " por Mercado Pago");
         if (observacion == null) {
             return;
         }
-
-        String sqlDatos =
-            "SELECT c.id_cuota, c.importe_original, " +
-            "tp.id_tarifa, tp.monto " +
-            "FROM suscripcion su " +
-            "INNER JOIN membresia m " +
-            "ON m.id_membresia = su.id_membresia " +
-            "INNER JOIN cuota c " +
-            "ON c.id_membresia = m.id_membresia " +
-            "AND c.estado IN ('PENDIENTE', 'VENCIDA') " +
-            "INNER JOIN tarifa_plan tp " +
-            "ON tp.id_plan = m.id_plan " +
-            "AND tp.codigo_tarifa = 'SUSCRIPCION' " +
-            "AND tp.activo = TRUE " +
-            "WHERE su.id_suscripcion = ? " +
-            "AND su.estado = 'ACTIVA' " +
-            "AND CURDATE() >= tp.vigencia_desde " +
-            "AND (tp.vigencia_hasta IS NULL " +
-            "OR CURDATE() <= tp.vigencia_hasta) " +
-            "ORDER BY c.periodo " +
-            "LIMIT 1 FOR UPDATE";
-
-        String sqlPago =
-            "INSERT INTO pago " +
-            "(id_cuota, id_medio_pago, id_tarifa_aplicada, " +
-            "id_usuario, id_sede, precio_original, descuento, " +
-            "recargo, saldo_aplicado, importe_final, " +
-            "importe_abonado, saldo_generado, estado) " +
-            "SELECT ?, mp.id_medio_pago, ?, ?, ?, ?, ?, " +
-            "0, 0, ?, ?, 0, 'REGISTRADO' " +
-            "FROM medio_pago mp " +
-            "WHERE mp.nombre = 'MERCADO_PAGO' " +
-            "AND mp.activo = TRUE";
-
-        String sqlIntento =
-            "INSERT INTO intento_cobro " +
-            "(id_suscripcion, id_cuota, id_usuario, id_sede, " +
-            "id_pago, numero_intento, importe, estado, observacion) " +
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 'APROBADO', ?)";
-
-        String sqlActualizarCuota =
-            "UPDATE cuota " +
-            "SET estado = 'PAGADA' " +
-            "WHERE id_cuota = ? " +
-            "AND estado IN ('PENDIENTE', 'VENCIDA')";
-
         try (Connection conexion = ConexionBD.conectar()) {
-
             conexion.setAutoCommit(false);
-
+            int numero;
             try {
-                int idCuota;
-                int idTarifa;
-                BigDecimal precioOriginal;
-                BigDecimal importeSuscripcion;
-
-                try (PreparedStatement consulta =
-                        conexion.prepareStatement(sqlDatos)) {
-
-                    consulta.setInt(1, idSuscripcion);
-
-                    try (ResultSet resultado = consulta.executeQuery()) {
-
-                        if (!resultado.next()) {
-                            conexion.rollback();
-
-                            JOptionPane.showMessageDialog(
-                                this,
-                                "No se encontró una cuota pendiente "
-                                    + "para la suscripción."
-                            );
-                            return;
-                        }
-
-                        idCuota = resultado.getInt("id_cuota");
-                        idTarifa = resultado.getInt("id_tarifa");
-                        precioOriginal =
-                            resultado.getBigDecimal("importe_original");
-                        importeSuscripcion =
-                            resultado.getBigDecimal("monto");
-                    }
-                }
-
-                BigDecimal descuento = precioOriginal
-                    .subtract(importeSuscripcion)
-                    .max(BigDecimal.ZERO);
-
-                long idPago;
-
-                try (PreparedStatement pago = conexion.prepareStatement(
-                        sqlPago,
-                        java.sql.Statement.RETURN_GENERATED_KEYS
-                )) {
-                    pago.setInt(1, idCuota);
-                    pago.setInt(2, idTarifa);
-                    pago.setInt(3, SesionUsuario.getIdUsuario());
-                    pago.setInt(4, SesionUsuario.getIdSede());
-                    pago.setBigDecimal(5, precioOriginal);
-                    pago.setBigDecimal(6, descuento);
-                    pago.setBigDecimal(7, importeSuscripcion);
-                    pago.setBigDecimal(8, importeSuscripcion);
-
-                    int filasPago = pago.executeUpdate();
-
-                    if (filasPago == 0) {
-                        throw new SQLException(
-                            "No se encontró el medio de pago MERCADO_PAGO."
-                        );
-                    }
-
-                    try (ResultSet claves = pago.getGeneratedKeys()) {
-                        if (!claves.next()) {
-                            throw new SQLException(
-                                "No se pudo obtener el identificador del pago."
-                            );
-                        }
-
-                        idPago = claves.getLong(1);
-                    }
-                }
-
-                try (PreparedStatement intento =
-                        conexion.prepareStatement(sqlIntento)) {
-
-                    intento.setInt(1, idSuscripcion);
-                    intento.setInt(2, idCuota);
-                    intento.setInt(
-                        3,
-                        SesionUsuario.getIdUsuario()
-                    );
-                    intento.setInt(
-                        4,
-                        SesionUsuario.getIdSede()
-                    );
-                    intento.setLong(5, idPago);
-                    intento.setInt(6, numeroIntento);
-                    intento.setBigDecimal(7, importeSuscripcion);
-                    intento.setString(8, observacion.trim());
-
-                    intento.executeUpdate();
-                }
-
-                try (PreparedStatement actualizar =
-                        conexion.prepareStatement(sqlActualizarCuota)) {
-
-                    actualizar.setInt(1, idCuota);
-
-                    if (actualizar.executeUpdate() == 0) {
-                        throw new SQLException(
-                            "La cuota ya no se encuentra pendiente."
-                        );
-                    }
-                }
-
+                numero = registrarResultado(conexion, entero(fila, COL_ID), idCuota,
+                    SesionUsuario.getIdUsuario(), SesionUsuario.getIdSede(),
+                    aprobado, observacion.trim());
                 conexion.commit();
-
-                JOptionPane.showMessageDialog(
-                    this,
-                    "El cobro fue aprobado correctamente.\n"
-                        + "La cuota quedó registrada como PAGADA."
-                );
-
-                cargarSuscripciones("");
-
-            } catch (SQLException error) {
+            } catch (SQLException | RuntimeException error) {
                 conexion.rollback();
                 throw error;
-
-            } finally {
-                conexion.setAutoCommit(true);
             }
-
+            JOptionPane.showMessageDialog(this, "Intento " + numero + " registrado como "
+                + resultado + " para el período " + periodo + "."
+                + (aprobado ? "\nLa cuota quedó PAGADA." : ""));
         } catch (SQLException error) {
-            JOptionPane.showMessageDialog(
-                this,
-                "No se pudo registrar el cobro aprobado.\n"
-                    + error.getMessage(),
-                "Error",
-                JOptionPane.ERROR_MESSAGE
-            );
+            JOptionPane.showMessageDialog(this, error.getMessage(),
+                "No se pudo registrar el resultado", JOptionPane.ERROR_MESSAGE);
+        }
+        cargarSuscripciones(campoBusqueda.getText().trim());
+    }
+
+    /** Opera sobre la cuota indicada; el llamador confirma o revierte la transacción. */
+    static int registrarResultado(Connection conexion, int idSuscripcion, int idCuota,
+            int idUsuario, int idSede, boolean aprobado, String observacion) throws SQLException {
+        exigirTransaccion(conexion);
+        if (observacion != null && observacion.length() > 250) {
+            throw new SQLException("La observación admite hasta 250 caracteres.");
+        }
+        String sqlDatos = "SELECT c.importe_original, tp.id_tarifa, tp.monto "
+            + "FROM suscripcion su JOIN membresia m ON m.id_membresia = su.id_membresia "
+            + "JOIN cuota c ON c.id_membresia = m.id_membresia "
+            + "JOIN tarifa_plan tp ON tp.id_plan = m.id_plan "
+            + "AND tp.codigo_tarifa = 'SUSCRIPCION' AND tp.activo = TRUE "
+            + "WHERE su.id_suscripcion = ? AND c.id_cuota = ? "
+            + "AND su.estado = 'ACTIVA' AND c.estado IN ('PENDIENTE', 'VENCIDA') "
+            + "AND CURDATE() >= tp.vigencia_desde "
+            + "AND (tp.vigencia_hasta IS NULL OR CURDATE() <= tp.vigencia_hasta) "
+            + "ORDER BY tp.vigencia_desde DESC, tp.id_tarifa DESC LIMIT 1 FOR UPDATE";
+        int idTarifa;
+        BigDecimal precioOriginal;
+        BigDecimal importe;
+        try (PreparedStatement ps = conexion.prepareStatement(sqlDatos)) {
+            ps.setInt(1, idSuscripcion);
+            ps.setInt(2, idCuota);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    throw new SQLException("La cuota seleccionada no está pendiente, "
+                        + "no pertenece a esta suscripción activa o no hay tarifa vigente.");
+                }
+                idTarifa = rs.getInt("id_tarifa");
+                precioOriginal = rs.getBigDecimal("importe_original");
+                importe = rs.getBigDecimal("monto");
+            }
+        }
+        // Se vuelve a consultar MySQL, sin confiar en un contador viejo de la tabla.
+        int ultimoNumero = 0;
+        try (PreparedStatement ps = conexion.prepareStatement(
+                "SELECT numero_intento, estado FROM intento_cobro "
+                + "WHERE id_suscripcion = ? AND id_cuota = ? FOR UPDATE")) {
+            ps.setInt(1, idSuscripcion);
+            ps.setInt(2, idCuota);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    if ("APROBADO".equals(rs.getString("estado"))) {
+                        throw new SQLException("Esta cuota ya tiene un intento aprobado.");
+                    }
+                    ultimoNumero = Math.max(ultimoNumero, rs.getInt("numero_intento"));
+                }
+            }
+        }
+        if (ultimoNumero >= 5) {
+            throw new SQLException("Esta cuota alcanzó el máximo de cinco intentos. "
+                + "Corresponde registrar el pago por un medio alternativo.");
+        }
+        long idPago = 0;
+        if (aprobado) {
+            String sqlPago = "INSERT INTO pago (id_cuota, id_medio_pago, id_tarifa_aplicada, "
+                + "id_usuario, id_sede, precio_original, descuento, recargo, saldo_aplicado, "
+                + "importe_final, importe_abonado, saldo_generado, estado) "
+                + "SELECT ?, mp.id_medio_pago, ?, ?, ?, ?, ?, 0, 0, ?, ?, 0, 'REGISTRADO' "
+                + "FROM medio_pago mp WHERE mp.nombre = 'MERCADO_PAGO' AND mp.activo = TRUE";
+            try (PreparedStatement ps = conexion.prepareStatement(sqlPago, Statement.RETURN_GENERATED_KEYS)) {
+                ps.setInt(1, idCuota);
+                ps.setInt(2, idTarifa);
+                ps.setInt(3, idUsuario);
+                ps.setInt(4, idSede);
+                ps.setBigDecimal(5, precioOriginal);
+                ps.setBigDecimal(6, precioOriginal.subtract(importe).max(BigDecimal.ZERO));
+                ps.setBigDecimal(7, importe);
+                ps.setBigDecimal(8, importe);
+                if (ps.executeUpdate() != 1) {
+                    throw new SQLException("No se encontró el medio de pago MERCADO_PAGO activo.");
+                }
+                try (ResultSet claves = ps.getGeneratedKeys()) {
+                    if (!claves.next()) {
+                        throw new SQLException("No se pudo obtener el identificador del pago.");
+                    }
+                    idPago = claves.getLong(1);
+                }
+            }
+        }
+        int numero = ultimoNumero + 1;
+        try (PreparedStatement ps = conexion.prepareStatement(
+                "INSERT INTO intento_cobro (id_suscripcion, id_cuota, id_usuario, id_sede, "
+                + "id_pago, numero_intento, importe, estado, observacion) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+            ps.setInt(1, idSuscripcion);
+            ps.setInt(2, idCuota);
+            ps.setInt(3, idUsuario);
+            ps.setInt(4, idSede);
+            if (aprobado) {
+                ps.setLong(5, idPago);
+            } else {
+                ps.setNull(5, Types.BIGINT);
+            }
+            ps.setInt(6, numero);
+            ps.setBigDecimal(7, importe);
+            ps.setString(8, aprobado ? "APROBADO" : "RECHAZADO");
+            ps.setString(9, observacion);
+            if (ps.executeUpdate() != 1) {
+                throw new SQLException("No se pudo registrar el intento.");
+            }
+        }
+        if (aprobado) {
+            try (PreparedStatement ps = conexion.prepareStatement(
+                    "UPDATE cuota SET estado = 'PAGADA' "
+                    + "WHERE id_cuota = ? AND estado IN ('PENDIENTE', 'VENCIDA')")) {
+                ps.setInt(1, idCuota);
+                if (ps.executeUpdate() != 1) {
+                    throw new SQLException("La cuota ya no está pendiente. Se revierte el cobro.");
+                }
+            }
+        }
+        return numero;
+    }
+
+    private static void exigirTransaccion(Connection conexion) throws SQLException {
+        if (conexion.getAutoCommit()) {
+            throw new SQLException("La operación requiere una transacción.");
         }
     }
-    
+
     private void finalizarSuscripcion() {
 
-        int fila = tablaSuscripciones.getSelectedRow();
+        int fila = filaSeleccionada();
 
         if (fila == -1) {
             JOptionPane.showMessageDialog(
@@ -624,14 +444,14 @@ public class VentanaSuscripciones extends JFrame {
         }
 
         int idSuscripcion = Integer.parseInt(
-            modeloTabla.getValueAt(fila, 0).toString()
+            modeloTabla.getValueAt(fila, COL_ID).toString()
         );
 
         String socio =
-            modeloTabla.getValueAt(fila, 2).toString();
+            modeloTabla.getValueAt(fila, COL_SOCIO).toString();
 
         String permanencia =
-            modeloTabla.getValueAt(fila, 7).toString();
+            modeloTabla.getValueAt(fila, COL_PERMANENCIA).toString();
 
         int confirmacion = JOptionPane.showConfirmDialog(
             this,
@@ -680,194 +500,145 @@ public class VentanaSuscripciones extends JFrame {
     }
     
     private void registrarNotificacion() {
-        int fila = tablaSuscripciones.getSelectedRow();
-
-        if (fila == -1) {
-            JOptionPane.showMessageDialog(
-                this,
-                "Primero debe seleccionar una suscripción."
-            );
+        int fila = filaSeleccionada();
+        if (fila < 0) {
+            JOptionPane.showMessageDialog(this, "Seleccione la suscripción y el período.");
             return;
         }
-
-        String estadoNotificacion =
-            modeloTabla.getValueAt(fila, 10).toString();
-
-        if ("ENVIADA".equals(estadoNotificacion)) {
-            JOptionPane.showMessageDialog(
-                this,
-                "El último rechazo ya fue notificado."
-            );
+        long idIntento = ((Number) modeloTabla.getValueAt(fila, COL_ID_INTENTO)).longValue();
+        if (idIntento == 0) {
+            JOptionPane.showMessageDialog(this,
+                "El último intento de este período no tiene una notificación pendiente.");
             return;
         }
-
-        if (!"PENDIENTE".equals(estadoNotificacion)) {
-            JOptionPane.showMessageDialog(
-                this,
-                "La suscripción no posee un rechazo pendiente "
-                + "de notificación."
-            );
-            return;
-        }
-
-        int idSuscripcion = Integer.parseInt(
-            modeloTabla.getValueAt(fila, 0).toString()
-        );
-
-        String observacion = JOptionPane.showInputDialog(
-            this,
-            "Ingrese una observación opcional:",
-            "Socio notificado por WhatsApp"
-        );
-
+        String observacion = JOptionPane.showInputDialog(this,
+            "Período: " + modeloTabla.getValueAt(fila, COL_PERIODO)
+            + "\nRegistre la notificación después de contactar al socio por WhatsApp."
+            + "\nObservación:", "Socio notificado por WhatsApp");
         if (observacion == null) {
             return;
         }
+        try (Connection conexion = ConexionBD.conectar()) {
+            conexion.setAutoCommit(false);
+            try {
+                registrarNotificacion(conexion, idIntento, entero(fila, COL_ID),
+                    entero(fila, COL_ID_CUOTA), SesionUsuario.getIdUsuario(), observacion.trim());
+                conexion.commit();
+            } catch (SQLException | RuntimeException error) {
+                conexion.rollback();
+                throw error;
+            }
+            JOptionPane.showMessageDialog(this, "La notificación quedó registrada.");
+        } catch (SQLException error) {
+            JOptionPane.showMessageDialog(this, error.getMessage(),
+                "No se pudo registrar la notificación", JOptionPane.ERROR_MESSAGE);
+        }
+        cargarSuscripciones(campoBusqueda.getText().trim());
+    }
 
-        String sql =
-        	    "INSERT INTO notificacion "
-        	  + "(id_intento, id_usuario, canal, estado, observacion) "
-        	  + "SELECT ic.id_intento, ?, "
-        	  + "'WHATSAPP', 'ENVIADA', ? "
-        	  + "FROM intento_cobro ic "
-        	  + "WHERE ic.id_suscripcion = ? "
-        	  + "AND ic.estado = 'RECHAZADO' "
-        	  + "AND NOT EXISTS ("
-        	  + "SELECT 1 FROM notificacion n "
-        	  + "WHERE n.id_intento = ic.id_intento"
-        	  + ") "
-        	  + "ORDER BY ic.numero_intento DESC "
-        	  + "LIMIT 1";
-
-        try (Connection conexion = ConexionBD.conectar();
-             PreparedStatement sentencia =
-                 conexion.prepareStatement(sql)) {
-
-        	sentencia.setInt(
-        		    1,
-        		    SesionUsuario.getIdUsuario()
-        		);
-
-        	sentencia.setString(2, observacion.trim());
-        	sentencia.setInt(3, idSuscripcion);
-
-            int filasAfectadas = sentencia.executeUpdate();
-
-            if (filasAfectadas == 0) {
-                JOptionPane.showMessageDialog(
-                    this,
-                    "No se encontró una notificación pendiente."
-                );
+    /** Registra el contacto manual referido al intento exacto que mostraba la fila. */
+    static void registrarNotificacion(Connection conexion, long idIntento,
+            int idSuscripcion, int idCuota, int idUsuario, String observacion) throws SQLException {
+        exigirTransaccion(conexion);
+        if (observacion != null && observacion.length() > 250) {
+            throw new SQLException("La observación admite hasta 250 caracteres.");
+        }
+        try (PreparedStatement ps = conexion.prepareStatement(
+                "SELECT id_intento FROM intento_cobro WHERE id_intento = ? "
+                + "AND id_suscripcion = ? AND id_cuota = ? AND estado = 'RECHAZADO' FOR UPDATE")) {
+            ps.setLong(1, idIntento);
+            ps.setInt(2, idSuscripcion);
+            ps.setInt(3, idCuota);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    throw new SQLException("El intento no corresponde al rechazo seleccionado.");
+                }
+            }
+        }
+        try (PreparedStatement ps = conexion.prepareStatement(
+                "SELECT estado FROM notificacion WHERE id_intento = ? FOR UPDATE")) {
+            ps.setLong(1, idIntento);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    if (!"PENDIENTE".equals(rs.getString("estado"))) {
+                        throw new SQLException("Este intento ya fue notificado.");
+                    }
+                }
+            }
+        }
+        try (PreparedStatement ps = conexion.prepareStatement(
+                "UPDATE notificacion SET estado = 'ENVIADA', id_usuario = ?, "
+                + "fecha_notificacion = CURRENT_TIMESTAMP, canal = 'WHATSAPP', observacion = ? "
+                + "WHERE id_intento = ? AND estado = 'PENDIENTE'")) {
+            ps.setInt(1, idUsuario);
+            ps.setString(2, observacion);
+            ps.setLong(3, idIntento);
+            if (ps.executeUpdate() > 0) {
                 return;
             }
-
-            JOptionPane.showMessageDialog(
-                this,
-                "La notificación por WhatsApp "
-                + "fue registrada correctamente."
-            );
-
-            cargarSuscripciones("");
-
-        } catch (SQLException e) {
-            JOptionPane.showMessageDialog(
-                this,
-                "No se pudo registrar la notificación.\n"
-                + e.getMessage(),
-                "Error",
-                JOptionPane.ERROR_MESSAGE
-            );
+        }
+        try (PreparedStatement ps = conexion.prepareStatement(
+                "INSERT INTO notificacion (id_intento, id_usuario, canal, estado, observacion) "
+                + "VALUES (?, ?, 'WHATSAPP', 'ENVIADA', ?)")) {
+            ps.setLong(1, idIntento);
+            ps.setInt(2, idUsuario);
+            ps.setString(3, observacion);
+            ps.executeUpdate();
         }
     }
 
     private void cargarSuscripciones(String busqueda) {
         modeloTabla.setRowCount(0);
-
-        String sql =
-            "SELECT su.id_suscripcion, so.dni, "
-          + "CONCAT(so.apellido, ', ', so.nombre) AS socio, "
-          + "so.telefono, se.nombre AS sede, p.nombre AS plan, "
-          + "su.dia_cobro, su.permanencia_hasta, su.estado, "
-          + "COALESCE(("
-          + "SELECT MAX(ic.numero_intento) "
-          + "FROM intento_cobro ic "
-          + "WHERE ic.id_suscripcion = su.id_suscripcion "
-          + "AND ic.id_cuota = c.id_cuota"
-          + "), 0) AS intentos, "
-          + "COALESCE(("
-          + "SELECT ic.estado FROM intento_cobro ic "
-          + "WHERE ic.id_suscripcion = su.id_suscripcion "
-          + "AND ic.id_cuota = c.id_cuota "
-          + "ORDER BY ic.numero_intento DESC LIMIT 1"
-          + "), 'SIN INTENTOS') AS ultimo_resultado, "
-          + "COALESCE(("
-          + "SELECT CASE "
-          + "WHEN icu.estado <> 'RECHAZADO' THEN '-' "
-          + "WHEN EXISTS ("
-          + "SELECT 1 FROM notificacion n "
-          + "WHERE n.id_intento = icu.id_intento"
-          + ") THEN 'ENVIADA' "
-          + "ELSE 'PENDIENTE' END "
-          + "FROM intento_cobro icu "
-          + "WHERE icu.id_suscripcion = su.id_suscripcion "
-          + "AND icu.id_cuota = c.id_cuota "
-          + "ORDER BY icu.numero_intento DESC LIMIT 1"
-          + "), '-') AS notificacion "
-          + "FROM suscripcion su "
-          + "INNER JOIN membresia m "
-          + "ON m.id_membresia = su.id_membresia "
-          + "INNER JOIN socio so "
-          + "ON so.id_socio = m.id_socio "
-          + "INNER JOIN sede se "
-          + "ON se.id_sede = so.id_sede_habitual "
-          + "INNER JOIN plan p "
-          + "ON p.id_plan = m.id_plan "
-          + "LEFT JOIN cuota c "
-          + "ON c.id_membresia = m.id_membresia "
-          + "AND c.periodo = "
-          + "CAST(DATE_FORMAT(CURDATE(), '%Y-%m-01') AS DATE) "
-          + "WHERE su.estado = 'ACTIVA' "
-          + "AND (so.dni LIKE ? OR so.nombre LIKE ? "
-          + "OR so.apellido LIKE ?) "
-          + "ORDER BY su.dia_cobro, so.apellido";
-
+        String sql = "SELECT su.id_suscripcion, so.dni, "
+            + "CONCAT(so.apellido, ', ', so.nombre) AS socio, so.telefono, "
+            + "se.nombre AS sede, p.nombre AS plan, su.dia_cobro, "
+            + "su.permanencia_hasta, su.estado, c.id_cuota, "
+            + "DATE_FORMAT(c.periodo, '%Y-%m') AS periodo, c.estado AS estado_cuota, "
+            + "COALESCE(ic.numero_intento, 0) AS intentos, "
+            + "COALESCE(ic.estado, 'SIN INTENTOS') AS ultimo_resultado, "
+            + "CASE WHEN ic.estado = 'RECHAZADO' THEN "
+            + "CASE WHEN EXISTS (SELECT 1 FROM notificacion n "
+            + "WHERE n.id_intento = ic.id_intento AND n.estado IN ('ENVIADA', 'CONFIRMADA')) "
+            + "THEN 'ENVIADA' ELSE 'PENDIENTE' END ELSE '-' END AS notificacion, "
+            + "ic.id_intento FROM suscripcion su "
+            + "JOIN membresia m ON m.id_membresia = su.id_membresia "
+            + "JOIN socio so ON so.id_socio = m.id_socio "
+            + "JOIN sede se ON se.id_sede = so.id_sede_habitual "
+            + "JOIN plan p ON p.id_plan = m.id_plan "
+            + "LEFT JOIN cuota c ON c.id_membresia = m.id_membresia "
+            + "LEFT JOIN intento_cobro ic ON ic.id_suscripcion = su.id_suscripcion "
+            + "AND ic.id_cuota = c.id_cuota AND ic.numero_intento = ("
+            + "SELECT MAX(ultimo.numero_intento) FROM intento_cobro ultimo "
+            + "WHERE ultimo.id_suscripcion = su.id_suscripcion AND ultimo.id_cuota = c.id_cuota) "
+            + "WHERE su.estado = 'ACTIVA' "
+            + "AND (so.dni LIKE ? OR so.nombre LIKE ? OR so.apellido LIKE ?) "
+            + "ORDER BY so.apellido, so.nombre, su.id_suscripcion, c.periodo DESC";
         try (Connection conexion = ConexionBD.conectar();
-             PreparedStatement sentencia =
-                 conexion.prepareStatement(sql)) {
-
+             PreparedStatement ps = conexion.prepareStatement(sql)) {
             String filtro = "%" + busqueda + "%";
-
-            sentencia.setString(1, filtro);
-            sentencia.setString(2, filtro);
-            sentencia.setString(3, filtro);
-
-            try (ResultSet resultado = sentencia.executeQuery()) {
-                while (resultado.next()) {
+            ps.setString(1, filtro);
+            ps.setString(2, filtro);
+            ps.setString(3, filtro);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String notificacion = rs.getString("notificacion");
+                    int idCuota = rs.getInt("id_cuota");
                     modeloTabla.addRow(new Object[] {
-                        resultado.getInt("id_suscripcion"),
-                        resultado.getString("dni"),
-                        resultado.getString("socio"),
-                        resultado.getString("telefono"),
-                        resultado.getString("sede"),
-                        resultado.getString("plan"),
-                        resultado.getInt("dia_cobro"),
-                        resultado.getDate("permanencia_hasta"),
-                        resultado.getInt("intentos"),
-                        resultado.getString("ultimo_resultado"),
-                        resultado.getString("notificacion"),
-                        resultado.getString("estado")
+                        rs.getInt("id_suscripcion"), rs.getString("dni"), rs.getString("socio"),
+                        idCuota == 0 ? "SIN CUOTA" : rs.getString("periodo"),
+                        idCuota == 0 ? "-" : rs.getString("estado_cuota"),
+                        rs.getString("telefono"), rs.getString("sede"), rs.getString("plan"),
+                        rs.getInt("dia_cobro"), rs.getDate("permanencia_hasta"),
+                        rs.getInt("intentos"), rs.getString("ultimo_resultado"),
+                        notificacion, rs.getString("estado"), idCuota,
+                        "PENDIENTE".equals(notificacion) ? rs.getLong("id_intento") : 0L
                     });
                 }
             }
-
-        } catch (SQLException e) {
-            JOptionPane.showMessageDialog(
-                this,
-                "No se pudieron cargar las suscripciones.\n"
-                + e.getMessage(),
-                "Error",
-                JOptionPane.ERROR_MESSAGE
-            );
+        } catch (SQLException error) {
+            JOptionPane.showMessageDialog(this,
+                "No se pudieron cargar las suscripciones.\n" + error.getMessage(),
+                "Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 }
