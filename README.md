@@ -1,27 +1,11 @@
-# Proyecto Impulso — TP3
+# Proyecto Impulso — Skilful
 
+Prototipo de escritorio en Java y MySQL para la gestión de socios, beneficios, cuotas, cobros y suscripciones de la cadena Skilful.
 
-La versión completa del TP3 está en [proyecto-impulso-tp3](proyecto-impulso-tp3). Esa carpeta reúne el proyecto Maven con `pom.xml`, `src/main/java` y `src/test/java`. Continúa el TP2 de Skilful e incorpora políticas de tarifa con abstracción, herencia y polimorfismo.
+## Entrega final (TP4)
 
+La versión completa para evaluar está en [proyecto-impulso-tp4](proyecto-impulso-tp4). Esa carpeta contiene el proyecto Maven (`pom.xml`, `src/main/java` y `src/test/java`), el script `Proyecto_Impulso_BD.sql`, consultas y resultados de las pruebas. El [README del TP4](proyecto-impulso-tp4/README.md) explica cómo importarlo en Eclipse, configurar MySQL y ejecutar la aplicación.
 
-## Abrir y ejecutar en Eclipse
+## Entregas anteriores
 
-
-1. Descargar el repositorio con **Code > Download ZIP** y extraerlo.
-2. En Eclipse: **File > Import > Maven > Existing Maven Projects**. Seleccionar la carpeta `proyecto-impulso-tp3`, que contiene `pom.xml`.
-3. Usar JDK 17. Configurar `IMPULSO_DB_USUARIO` e `IMPULSO_DB_CONTRASENA` con las credenciales de la instalación local de MySQL.
-4. Si todavía no existe la base `proyecto_impulso`, ejecutar [Proyecto_Impulso_BD.sql](Proyecto_Impulso_BD.sql) en MySQL. Si ya funciona la base del TP2, no es necesario recrearla.
-5. Ejecutar `ar.com.skilful.vista.VentanaLogin` como **Java Application**.
-
-
-Las cuentas ficticias iniciales de la aplicación son `admin`, `recepcion` y `profesor`, con las contraseñas indicadas en el script SQL, si no fueron modificadas en la base local. Son independientes de las credenciales de MySQL.
-
-
-## Pruebas y documentación
-
-
-Las clases `CobroServicioPrueba` y `PoliticasCobroPrueba` se ejecutan desde `src/test/java` con **Run As > Java Application**, sin MySQL. `CorreccionesPersistenciaPrueba` requiere MySQL. Son aplicaciones Java con método `main`, no pruebas JUnit; `mvn test` no reemplaza su ejecución explícita. Consultar [resultados](proyecto-impulso-tp3/RESULTADOS_PRUEBAS.md), [cambios de POO](proyecto-impulso-tp3/CAMBIOS_TP3.md) y el [README del proyecto](proyecto-impulso-tp3/README.md).
-
-
-La carpeta `proyecto-impulso` corresponde al TP2. Para revisar la entrega actual, abrir [proyecto-impulso-tp3](proyecto-impulso-tp3).
-
+Las carpetas `proyecto-impulso` y `proyecto-impulso-tp3` conservan las versiones previas para mostrar la evolución incremental. Para revisar la entrega final, utilizar `proyecto-impulso-tp4`.
